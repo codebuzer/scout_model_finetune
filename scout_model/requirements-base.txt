@@ -1,0 +1,18 @@
+# requirements-base.txt
+safetensors>=0.3.1
+fastapi>=0.68.0
+uvicorn>=0.15.0
+pydantic>=1.8.0
+accelerate==0.27.0
+bitsandbytes==0.41.1
+torch==2.1.0
+transformers==4.51.0
+einops>=0.6.1
+flash-attn>=2.3.3
+numpy==1.24.3
+scipy==1.11.3
+packaging
+pyyaml
+tqdm
+regex
+requests
