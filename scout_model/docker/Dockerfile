@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -6,8 +6,16 @@ ENV PYTHONUNBUFFERED=1
 ENV CUDA_HOME=/usr/local/cuda
 ENV PATH=${CUDA_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
-ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6"
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9"
 ENV FORCE_CUDA="1"
+ENV BNB_CUDA_VERSION=122
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Symlinks for CUDA libraries
+RUN ln -sf /usr/local/cuda/lib64/libcudart.so /usr/lib/libcudart.so && \
+    ln -sf /usr/local/cuda/lib64/libnvrtc.so /usr/lib/libnvrtc.so && \
+    ln -sf /usr/local/cuda/lib64/libcusparse.so.12 /usr/local/cuda/lib64/libcusparse.so && \
+    ldconfig
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -24,56 +32,51 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements files
+# Copy requirement files
 COPY requirements-base.txt requirements-cuda.txt ./
 
-# Install Python packages in specific order with exact versions
+# Core Python setup
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir numpy==1.24.3 && \
-    pip3 install --no-cache-dir scipy==1.11.3 && \
-    pip3 install --no-cache-dir ninja && \
-    pip3 install --no-cache-dir torch==2.1.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
-    pip3 install --no-cache-dir bitsandbytes==0.41.1 && \
-    pip3 install --no-cache-dir transformers==4.51.0 && \
-    pip3 install --no-cache-dir accelerate==0.27.0 && \
-    pip3 install --no-cache-dir einops==0.6.1 && \
-    pip3 install --no-cache-dir -r requirements-base.txt
+    pip3 install --no-cache-dir numpy==1.24.3 scipy==1.11.3 ninja
 
-# Try installing flash-attention from source
+# Install PyTorch with CUDA 12.1 (compatible with CUDA 12.2)
+RUN pip3 install --no-cache-dir torch==2.1.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install bitsandbytes
+RUN pip3 uninstall -y bitsandbytes && \
+    pip3 install bitsandbytes
+
+# Install FlashAttention v2.3.3 (compatible with torch 2.1.0)
 RUN pip3 install --no-cache-dir packaging wheel && \
     git clone https://github.com/Dao-AILab/flash-attention.git && \
     cd flash-attention && \
     git checkout v2.3.3 && \
-    pip3 install . && \
+    MAX_JOBS=4 TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9" pip3 install --no-build-isolation . && \
     cd .. && \
     rm -rf flash-attention
 
-# Create necessary directories
+# Install additional base requirements
+RUN pip3 install --no-cache-dir -r requirements-base.txt
+
+# Install CUDA-specific requirements
+RUN pip3 install --no-cache-dir -r requirements-cuda.txt
+
+# Create app folders
 RUN mkdir -p /app/models /app/data /app/logs ~/.huggingface
 
-# Copy source code
+# Copy source code and models
 COPY src/ /app/src/
 COPY models/ /app/models/
 
-# Copy and set up entrypoint
+# Entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Set up CUDA environment
-RUN ln -s /usr/local/cuda/lib64/libcudart.so /usr/lib/libcudart.so && \
-    ln -s /usr/local/cuda/lib64/libnvrtc.so /usr/lib/libnvrtc.so && \
-    ldconfig
-
-# Add CUDA libraries to path
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
-
-# Verify installations
+# Final environment sanity check (CPU-safe)
 RUN python3 -c "import numpy; print('NumPy version:', numpy.__version__)" && \
     python3 -c "import torch; print('PyTorch version:', torch.__version__)" && \
-    python3 -c "import transformers; print('Transformers version:', transformers.__version__)" && \
-    python3 -c "import bitsandbytes; print('bitsandbytes version:', bitsandbytes.__version__)"
+    python3 -c "import transformers; print('Transformers version:', transformers.__version__)"
 
-ENTRYPOINT ["/entrypoint.sh"]
+# No need to run bitsandbytes in the Dockerfile, you can test it later in entrypoint or after container starts
