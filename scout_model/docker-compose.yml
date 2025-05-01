@@ -1,37 +1,35 @@
-version: '3.8'
-
 services:
   scout_model:
     container_name: scout_model_container
     build:
       context: .
       dockerfile: docker/Dockerfile
-    volumes:
-      - type: bind
-        source: ./data
-        target: /app/data
-      - type: bind
-        source: ./models
-        target: /app/models
-      - type: bind
-        source: ./logs
-        target: /app/logs
+      args:
+        CUDA_VERSION: "12.2"
+    runtime: nvidia
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [gpu, utility, compute]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+    network_mode: "host"
     environment:
-      CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "all"
-      TORCH_CUDA_ARCH_LIST: "7.5;8.0;8.6"
-      HUGGING_FACE_TOKEN: ${HUGGING_FACE_TOKEN}
+      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+      CUDA_VISIBLE_DEVICES: "0"
+      BNB_CUDA_VERSION: "122"
+      HUGGING_FACE_TOKEN: "${HUGGING_FACE_TOKEN}"
       API_PORT: "8010"
       API_HOST: "0.0.0.0"
-      MODEL_NAME: ${MODEL_NAME}
-      MAX_TOKEN_LENGTH: ${MAX_TOKEN_LENGTH}
+      MODEL_NAME: "${MODEL_NAME}"
+      MAX_TOKEN_LENGTH: "${MAX_TOKEN_LENGTH}"
     env_file:
       - .env
     ports:
@@ -41,5 +39,9 @@ services:
       memlock: -1
       stack: 67108864
     restart: unless-stopped
-    command: ["python3", "-m", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8010"]
-
+    command: [
+      "python3", "-m", "uvicorn",
+      "src.api.app:app",
+      "--host", "0.0.0.0",
+      "--port", "8010"
+    ]
